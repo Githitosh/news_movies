@@ -1,4 +1,6 @@
-/* News Shorts drawing engine (movies fork: OPT.urlOnVideo burns post URL onto frames). Phone and X and YouTube are 1080×1920. PC is 1920×1080. 30fps. 3.2 seconds per story, or 4.2 / 5.2. */
+/* News Shorts drawing engine (movies fork: OPT.urlOnVideo burns the X 引用 URL
+   inside the video picture at the bottom). Phone and X and YouTube are 1080×1920.
+   PC is 1920×1080. 30fps. 3.2 seconds per story, or 4.2 / 5.2. */
 (function (global) {
 'use strict';
 
@@ -851,6 +853,37 @@ function prepare(script, preset, opts) {
 function textX(ctx, t, x, y, sx, align) {
   ctx.save(); ctx.translate(x, y); ctx.scale(sx, 1); ctx.textAlign = align || 'center'; ctx.fillText(t, 0, 0); ctx.restore();
 }
+
+/* Movies / X posting: burn the stock post URL (引用) inside the picture at the
+   bottom. Clamped to the canvas so PC/wide never draw past H. Data players keep
+   a clickable HTML link instead and leave OPT.urlOnVideo unset. */
+function drawCiteUrl(ctx, url) {
+  if (!OPT.urlOnVideo || !url) return;
+  const raw = String(url).replace(/^https?:\/\//i, '').trim();
+  if (!raw) return;
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.textBaseline = 'alphabetic';
+  const us = Math.max(18, Math.min(30, Math.round(H * 0.014)));
+  const barH = Math.max(us + 22, Math.round(H * 0.034));
+  const pad = Math.max(14, Math.round(barH * 0.28));
+  const y = Math.min(H - pad, H - Math.max(8, us * 0.2));
+  const fade = ctx.createLinearGradient(0, H - barH, 0, H);
+  fade.addColorStop(0, 'rgba(0,0,0,0)');
+  fade.addColorStop(0.4, 'rgba(0,0,0,0.28)');
+  fade.addColorStop(1, 'rgba(0,0,0,0.58)');
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, H - barH, W, barH);
+  ctx.font = font(600, us, F_SANS);
+  ctx.fillStyle = 'rgba(245,241,233,0.95)';
+  ctx.shadowColor = 'rgba(0,0,0,0.9)';
+  ctx.shadowBlur = 5;
+  const maxW = Math.max(40, P.right - P.left);
+  const uw = ctx.measureText(raw).width;
+  const sx = Math.min(1, maxW / Math.max(1, uw));
+  textX(ctx, raw, P.left, y, sx, 'left');
+  ctx.restore();
+}
 function subLine(ctx, line, size, base, cx) {
   const toks = tokens(line);
   const ws = toks.map(k => adv(k.small ? k.t.toUpperCase() : k.t, font(900, k.small ? size * P.sub.small : size, F_SERIF)) * P.sub.sx);
@@ -917,16 +950,6 @@ function drawItem(ctx, show, i, t, bgs) {
   const cw = ctx.measureText(it.credit2).width, cs = Math.min(P.credit.size, P.credit.size * P.credit.maxW / cw);
   ctx.font = font(400, cs, F_SANS);
   ctx.fillText(it.credit2, P.left, P.credit.base2 - (P.credit.size - cs) * 1.33);
-  /* Movies path (X posting): burn the post URL onto the frame under the credit line. Data players keep a clickable link instead. */
-  if (OPT.urlOnVideo && it.url) {
-    const raw = String(it.url).replace(/^https?:\/\//, '');
-    const us = Math.max(14, Math.min(P.credit.size, P.credit.size * 0.95));
-    ctx.font = font(600, us, F_SANS);
-    ctx.fillStyle = creditNow();
-    const uw = ctx.measureText(raw).width;
-    const usx = Math.min(1, (P.right - P.left) / Math.max(1, uw));
-    textX(ctx, raw, P.left, P.credit.base2 + us + 6, usx, 'left');
-  }
   ctx.fillStyle = inkNow();
   if (L.still) {
     ctx.globalAlpha = 1;
@@ -954,6 +977,7 @@ function drawItem(ctx, show, i, t, bgs) {
     ctx.font = font(700, P.foot.page, F_TIMES);
     textX(ctx, it.page, P.cat.right, P.foot.base, P.foot.psx, 'right');
     ctx.globalAlpha = 1;
+    drawCiteUrl(ctx, it.url);
     return;
   }
 
@@ -1007,6 +1031,7 @@ function drawItem(ctx, show, i, t, bgs) {
     it.tags.forEach((s, k) => { textX(ctx, s, x, P.tags.base, P.tags.sx, 'left'); x += ws[k] + P.tags.gap; });
   }
   ctx.globalAlpha = 1;
+  drawCiteUrl(ctx, it.url);
 }
 
 function drawFrame(ctx, show, T, bgs) {
