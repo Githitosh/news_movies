@@ -2,7 +2,7 @@
 
 Public host for **news videos posted to X**. Collect in [githito.xapi](https://github.com/Githitosh/githito.xapi) publishes stock JSON (and later media) here.
 
-- **URL on video:** the X post URL is burned onto / under each frame when you export MP4 from this page (movies path only).
+- **URL on video:** the X post 引用 URL is burned **inside the video picture at the bottom** of every frame / MP4 export (movies path only).
 - **Data player** (settings + clickable URL links): [news_data](https://github.com/Githitosh/news_data) — separate repo.
 - Stay **public** so X can reach the files. Do not privatize with the program/data repos.
 
