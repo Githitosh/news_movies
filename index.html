@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>news_movies — X videos</title>
+<style>
+  :root { --bg:#0f1218; --ink:#f5f1e9; --acc:#7eb8ff; --muted:#9aa3b2; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Noto Sans JP", system-ui, sans-serif; background: linear-gradient(165deg, #141821 0%, #0b0e14 55%, #182033 100%); color: var(--ink); min-height: 100vh; }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 18px 64px; }
+  h1 { font-family: "Noto Serif JP", Georgia, serif; font-weight: 700; font-size: 1.7rem; margin: 0 0 8px; letter-spacing: 0.02em; }
+  p.lead { color: var(--muted); margin: 0 0 22px; line-height: 1.5; }
+  canvas { width: 100%; max-width: 360px; aspect-ratio: 9/16; display: block; margin: 0 auto 16px; background: #000; border-radius: 4px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 12px 0 8px; }
+  button, a.btn { appearance: none; border: 0; background: var(--acc); color: #0b1020; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; text-decoration: none; font-size: 14px; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid #3a4558; }
+  #status { text-align: center; color: var(--muted); font-size: 13px; min-height: 1.4em; margin-top: 8px; }
+  #status.err { color: #ff8f8f; }
+  code { font-size: 0.9em; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700;900&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+</head>
+<body>
+<main>
+  <h1>news_movies</h1>
+  <p class="lead">Public host for news videos posted to X. Post URLs are burned onto every frame (not a separate clickable link). Stock JSON lands in <code>v1/</code> from Collect.</p>
+  <canvas id="cv" width="1080" height="1920"></canvas>
+  <div class="row">
+    <button id="play" type="button">Play</button>
+    <button id="export" type="button" disabled>Export MP4 (X)</button>
+    <a class="btn ghost" id="raw" href="v1/stock-news-ja.json" target="_blank" rel="noopener">Raw stock</a>
+  </div>
+  <div id="status">Loading stock…</div>
+  <footer>
+    Data players (settings + clickable URL links) live in <code>news_data</code>. This repo stays public for X.
+  </footer>
+</main>
+<script src="lib/mp4-muxer.js"></script>
+<script src="src/engine.js"></script>
+<script>
+'use strict';
+const E = window.NSEngine;
+const STOCK = 'v1/stock-news-ja.json';
+const LOOK = { uniform: true, jp: 2, same: true, lang: 'ja', urlOnVideo: true };
+const S = { script: null, show: null, bgs: {}, playing: false, raf: 0, t0: 0, origin: 0, outs: [] };
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const statusEl = document.getElementById('status');
+const say = (m, err) => { statusEl.textContent = m || ''; statusEl.classList.toggle('err', !!err); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function loadBgs() {
+  await Promise.all('ABCDE'.split('').map(g => new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => { S.bgs[g] = im; res(); };
+    im.onerror = rej;
+    im.src = 'assets/bg_' + g + '.jpg';
+  })));
+}
+
+function cardItem(c, i) {
+  const ja = Array.isArray(c.ja) ? c.ja : [];
+  const kw = String(c.kw || c.n || 'NEWS').slice(0, 24);
+  return {
+    kw, cat: 'NEWS', topic: String(c.n || c.h || '').replace(/^@/, '').slice(0, 24),
+    head: [String(ja[0] || c.kw || kw).slice(0, 80)],
+    sub: [],
+    jp: ja.length ? ja.map(String) : [String(c.kw || kw)],
+    tags: [],
+    src: c.h ? ('X @' + String(c.h).replace(/^@/, '')) : 'X',
+    date: '',
+    url: String(c.url || ''),
+    bg: 'ABCDE'[i % 5],
+  };
+}
+
+function scriptFromStock(d) {
+  const cards = d.cards || [];
+  const videos = d.videos || [];
+  let pack = [];
+  if (videos.length) {
+    const v = videos[0];
+    const ids = v.c || v.ids || [];
+    const byId = new Map(cards.map(c => [String(c.id), c]));
+    pack = ids.map(id => byId.get(String(id))).filter(Boolean);
+  }
+  if (!pack.length) pack = cards.slice(0, 10);
+  if (!pack.length) throw new Error('No news cards in stock yet.');
+  const items = pack.slice(0, 10).map(cardItem);
+  const today = new Date();
+  const date = today.toISOString().slice(0, 10);
+  return { date, items };
+}
+
+function draw(t) {
+  if (!S.show) return;
+  E.drawFrame(ctx, S.show, t, S.bgs);
+}
+function tick(now) {
+  if (!S.playing || !S.show) return;
+  const t = ((now - S.t0) / 1000 + S.origin) % S.show.duration;
+  draw(t);
+  S.raf = requestAnimationFrame(tick);
+}
+function play() {
+  if (!S.show) return;
+  S.playing = !S.playing;
+  document.getElementById('play').textContent = S.playing ? 'Pause' : 'Play';
+  if (S.playing) { S.t0 = performance.now(); S.raf = requestAnimationFrame(tick); }
+  else cancelAnimationFrame(S.raf);
+}
+
+async function encodeShow(show) {
+  const W = show.W, H = show.H, fps = E.FPS, dur = show.duration, N = Math.round(dur * fps);
+  const vcfg = { codec: 'avc1.640028', width: W, height: H, bitrate: 8_000_000, framerate: fps, avc: { format: 'avc' } };
+  let ok = typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && window.Mp4Muxer;
+  if (ok) { try { ok = (await VideoEncoder.isConfigSupported(vcfg)).supported; } catch (e) { ok = false; } }
+  if (!ok) throw new Error('This browser cannot encode MP4 (need Chrome/Edge with VideoEncoder).');
+  const muxer = new Mp4Muxer.Muxer({
+    target: new Mp4Muxer.ArrayBufferTarget(),
+    video: { codec: 'avc', width: W, height: H, frameRate: fps },
+    fastStart: 'in-memory', firstTimestampBehavior: 'offset',
+  });
+  let fail = null;
+  const enc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => { fail = e; } });
+  enc.configure(vcfg);
+  const off = document.createElement('canvas'); off.width = W; off.height = H;
+  const c2 = off.getContext('2d');
+  for (let f = 0; f < N; f++) {
+    if (fail) throw fail;
+    E.drawFrame(c2, show, f / fps, S.bgs);
+    const vf = new VideoFrame(off, { timestamp: Math.round(f * 1e6 / fps), duration: Math.round(1e6 / fps) });
+    enc.encode(vf, { keyFrame: f % (fps * 2) === 0 });
+    vf.close();
+    while (enc.encodeQueueSize > 6) await sleep(4);
+    if (f % 30 === 0) { say('Exporting… ' + Math.round(f / N * 100) + '%'); await sleep(0); }
+  }
+  await enc.flush(); enc.close();
+  if (fail) throw fail;
+  muxer.finalize();
+  return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+}
+
+async function exportMp4() {
+  if (!S.script) return;
+  const btn = document.getElementById('export');
+  btn.disabled = true;
+  try {
+    const show = E.prepare(S.script, 'x', LOOK);
+    say('Exporting MP4 with URL on frames…');
+    const blob = await encodeShow(show);
+    const name = 'news_movies_x_' + (S.script.date || 'today') + '.mp4';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    say('Downloaded ' + name + ' (URL burned under each frame). Share to X.');
+  } catch (e) {
+    say(String(e.message || e), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function boot() {
+  try {
+    await loadBgs();
+    const res = await fetch(STOCK + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('Stock not published yet (' + res.status + '). Run Collect after MOVIES_TOKEN is set.');
+    const data = await res.json();
+    S.script = scriptFromStock(data);
+    S.show = E.prepare(S.script, 'x', LOOK);
+    draw(0);
+    document.getElementById('export').disabled = false;
+    say((S.script.items.length) + ' clips ready · URL burned on export');
+  } catch (e) {
+    say(String(e.message || e), true);
+  }
+}
+
+document.getElementById('play').onclick = play;
+document.getElementById('export').onclick = exportMp4;
+boot();
+</script>
+</body>
+</html>
